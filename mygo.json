@@ -1,0 +1,6 @@
+{
+  "name": "Folcon",
+  "identifier": "io.github.byte-me-labs.folcon",
+  "version": "0.1.0",
+  "out": "build"
+}
