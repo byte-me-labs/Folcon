@@ -3,6 +3,7 @@ name: Release build
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,6 +23,7 @@ jobs:
         run: go tool mygo build -skip-installer
 
       - name: Upload assets to the release
+        if: github.event_name == 'release'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
