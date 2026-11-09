@@ -9,7 +9,7 @@ import (
 )
 
 func TestLoadSourceICO(t *testing.T) {
-	ico := makeICO(2, 2, 32, twoByTwoDIB())
+	ico := makeICO(2, []byte{1, 2, 3})
 	path := filepath.Join(t.TempDir(), "test.ico")
 	if err := os.WriteFile(path, ico, 0o644); err != nil {
 		t.Fatal(err)
@@ -18,7 +18,7 @@ func TestLoadSourceICO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSource() error: %v", err)
 	}
-	if !src.IsICO || len(src.Groups) != 1 || len(src.Groups[0].Frames) != 1 {
+	if !src.IsICO || len(src.Groups) != 1 || src.Groups[0].MaxWidth != 2 {
 		t.Fatalf("source = %+v", src)
 	}
 }
@@ -37,12 +37,11 @@ func TestLoadSourceEXE(t *testing.T) {
 	}
 	usable := 0
 	for i := range src.Groups {
-		if len(src.Groups[i].Frames) > 0 {
+		if src.Groups[i].Err == nil && src.Groups[i].MaxWidth > 0 {
 			usable++
 		} else {
-			t.Logf("group %d (%q, id=%d, string=%v): %v",
-				src.Groups[i].Ordinal, src.Groups[i].Name, src.Groups[i].ID,
-				src.Groups[i].IsString, src.Groups[i].Err)
+			t.Logf("group %d: width=%d err=%v",
+				src.Groups[i].Ordinal, src.Groups[i].MaxWidth, src.Groups[i].Err)
 		}
 	}
 	if usable == 0 {

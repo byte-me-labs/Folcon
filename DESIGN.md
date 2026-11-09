@@ -80,7 +80,7 @@ Folcon 是一个 Windows 小工具：把一个文件夹在资源管理器中的�
 选好文件夹后直接打开系统文件选择器，不再有需要手动点按钮进入的向导页：
 
 1. 文件选择器默认定位到当前文件夹，过滤器 `.exe`、`.ico`；选择后校验文件必须位于当前文件夹内部（含子目录）。
-2. 读取图标组，自动选择**最大尺寸最大**的可用组（并列时取序号小的，`.ico` 只有一个组），不显示预览或确认页，立即写入。`IconResource` 引用的是整个图标组，Explorer 会按视图大小自行取用组内相应尺寸；选择最大组即保证大图标视图能拿到最高分辨率。
+2. 读取图标组，自动选择**最大帧宽度最大**的可用组（并列时取序号小的，`.ico` 只有一个组），不显示预览或确认页，立即写入。`IconResource` 引用的是整个图标组，Explorer 会按视图大小自行取用组内相应尺寸；选择最大组即保证大图标视图能拿到最高分辨率。
 3. 写入成功后自动处理下一个文件夹，再次弹出文件选择器。
 4. 取消文件选择器：跳过当前文件夹继续；若尚未应用任何图标，则直接回到欢迎页。
 5. 空文件夹 / 预检失败：显示原因，提供 **跳过此文件夹** / **结束向导**。
@@ -145,10 +145,7 @@ ConfirmFileOp=0
 ### 4.4 图标组枚举与序号
 
 - 用 `LoadLibraryExW(path, 0, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE)` 以数据方式加载，不执行目标代码。
-- 用 `EnumResourceNamesW(handle, RT_GROUP_ICON /* 14 */, ...)` 枚举图标组，记录：
-  - 组标识（数字 ID 或字符串名）
-  - 枚举顺序（即 `IconResource` 的序号）
-  - 每个组包含的尺寸列表
+- 用 `EnumResourceNamesW(handle, RT_GROUP_ICON /* 14 */, ...)` 枚举图标组，按枚举顺序记录每组的最大帧宽度；组标识（数字 ID 或字符串名）只用于定位资源。
 - 序号语义已实测验证：
   - `powershell.exe` 有两组：序号 0 = 普通 PowerShell 图标，序号 1 = 带盾牌图标。
   - 写入 `IconResource=.\powershell.exe,1` 后，文件夹实际渲染为盾牌图标。
@@ -156,8 +153,8 @@ ConfirmFileOp=0
 
 ### 4.5 图标帧读取
 
-- 用与枚举相同的模块句柄直接读取资源：`FindResourceW` → `SizeofResource` → `LoadResource` → `LockResource`。不经过 winres，避免其 MUI / 语言回退逻辑漏掉图标组（实测 notepad.exe 上 winres 只看到 5 个非图标资源）。
-- 帧可能是完整 PNG（通常是 256×256）或 BMP/DIB；Folcon 只读取组内每帧的声明尺寸（宽高字节为 0 表示 256），用于选出分辨率最高的组。
+- 用与枚举相同的模块句柄直接读取资源：`FindResourceW` → `LoadResourceData`（x/sys 封装）。不经过 winres，避免其 MUI / 语言回退逻辑漏掉图标组（实测 notepad.exe 上 winres 只看到 5 个非图标资源）。
+- 帧可能是完整 PNG（通常是 256×256）或 BMP/DIB；Folcon 只读取组内每帧的声明宽度（宽度字节为 0 表示 256），用于选出分辨率最高的组，不读取图像数据。
 - 引用的是整个图标组，不单独导出或渲染某一帧；Explorer 按视图大小从组内取用对应帧。
 - `.ico` 文件解析 `ICONDIR` / `ICONDIRENTRY`，同样读取实际帧尺寸。
 
@@ -349,7 +346,7 @@ Welcome
 - **图标组**
   - 序号与 `ExtractIconEx` 一致
   - 字符串命名组、数字命名组
-  - 缺失尺寸识别
+  - 按最大帧宽度选组（宽度 0 视为 256）
 - **属性**
   - 先 ini 后 folder 的顺序
   - 已有 Hidden/System 位的保留

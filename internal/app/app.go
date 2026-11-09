@@ -330,14 +330,14 @@ func (a *App) loadSource(candidate string) {
 				a.sourceProblem(gen, folder, loadErr)
 				return
 			}
-			usable := usableGroupIndexes(src)
-			if len(usable) == 0 {
+			index := defaultGroup(src)
+			if index < 0 {
 				a.status = ""
 				a.sourceProblem(gen, folder, errors.New("该文件不包含可读取的图标。"))
 				return
 			}
 			a.status = ""
-			a.applyGroup(folder, src, defaultGroup(src, usable))
+			a.applyGroup(folder, src, index)
 		})
 	}()
 }
@@ -369,39 +369,24 @@ func (a *App) sourceProblem(gen int, folder string, err error) {
 	}()
 }
 
-// usableGroupIndexes lists the groups that have decodable frames.
-func usableGroupIndexes(src *winicon.Source) []int {
-	if src == nil {
-		return nil
-	}
-	var out []int
-	for i := range src.Groups {
-		if src.Groups[i].Err == nil && len(src.Groups[i].Frames) > 0 {
-			out = append(out, i)
-		}
-	}
-	return out
-}
-
-// defaultGroup picks the usable group that holds the largest icon, so the
+// defaultGroup picks the usable group that holds the widest icon, so the
 // folder gets the highest-resolution artwork. Ties keep the earlier group.
-func defaultGroup(src *winicon.Source, usable []int) int {
-	best := usable[0]
-	bestSize := largestSize(&src.Groups[best])
-	for _, i := range usable[1:] {
-		if size := largestSize(&src.Groups[i]); size > bestSize {
-			best, bestSize = i, size
+// It returns -1 when the source has no usable group.
+func defaultGroup(src *winicon.Source) int {
+	best := -1
+	if src == nil {
+		return best
+	}
+	for i := range src.Groups {
+		g := &src.Groups[i]
+		if g.Err != nil || g.MaxWidth <= 0 {
+			continue
+		}
+		if best < 0 || g.MaxWidth > src.Groups[best].MaxWidth {
+			best = i
 		}
 	}
 	return best
-}
-
-func largestSize(g *winicon.Group) int {
-	sizes := g.Sizes()
-	if len(sizes) == 0 {
-		return 0
-	}
-	return sizes[len(sizes)-1]
 }
 
 func (a *App) applyGroup(folder string, src *winicon.Source, index int) {
@@ -409,7 +394,7 @@ func (a *App) applyGroup(folder string, src *winicon.Source, index int) {
 		return
 	}
 	group := src.Groups[index]
-	if group.Err != nil || len(group.Frames) == 0 {
+	if group.Err != nil || group.MaxWidth <= 0 {
 		return
 	}
 

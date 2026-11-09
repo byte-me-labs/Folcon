@@ -87,18 +87,3 @@ func TestHasSourceFiles(t *testing.T) {
 		t.Fatal("HasSourceFiles() missed an .exe in a subdirectory")
 	}
 }
-
-func TestSuggestSource(t *testing.T) {
-	dir := t.TempDir()
-	sub := filepath.Join(dir, "bin")
-	if err := os.Mkdir(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	deep := filepath.Join(sub, "app.exe")
-	if err := os.WriteFile(deep, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := SuggestSource(dir); got != deep {
-		t.Fatalf("SuggestSource() = %q, want %q", got, deep)
-	}
-}

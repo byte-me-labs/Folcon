@@ -21,9 +21,9 @@ const (
 
 var enumResourceNamesW = windows.NewLazySystemDLL("kernel32.dll").NewProc("EnumResourceNamesW")
 
-// Identifier names one icon resource. Windows resources are identified by a
+// identifier names one icon resource. Windows resources are identified by a
 // 16-bit number or by a UTF-16 string.
-type Identifier struct {
+type identifier struct {
 	ID       uint16
 	Name     string
 	IsString bool
@@ -50,7 +50,7 @@ func LoadSource(path string) (*Source, error) {
 		if err != nil {
 			return nil, fmt.Errorf("读取图标文件失败：%w", err)
 		}
-		frames, err := ParseICO(data)
+		largest, err := ParseICO(data)
 		if err != nil {
 			return nil, err
 		}
@@ -58,9 +58,8 @@ func LoadSource(path string) (*Source, error) {
 			Path:  abs,
 			IsICO: true,
 			Groups: []Group{{
-				Ordinal: 0,
-				Name:    strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs)),
-				Frames:  frames,
+				Ordinal:  0,
+				MaxWidth: largest,
 			}},
 		}, nil
 	case ".exe":
@@ -88,38 +87,30 @@ func loadEXE(path string) (*Source, error) {
 
 	groups := make([]Group, 0, len(ids))
 	for i, ident := range ids {
-		g := Group{
-			Ordinal:  i,
-			ID:       ident.ID,
-			Name:     ident.Name,
-			IsString: ident.IsString,
-		}
+		g := Group{Ordinal: i}
 		data, err := loadResource(h, ident, windows.ResourceID(rtGroupIcon))
 		if err != nil {
 			g.Err = fmt.Errorf("读取图标组失败：%w", err)
 			groups = append(groups, g)
 			continue
 		}
-		frames, err := parseGroupResource(h, data)
+		g.MaxWidth, err = parseGroupResource(h, data)
 		if err != nil {
 			g.Err = err
-			groups = append(groups, g)
-			continue
 		}
-		g.Frames = frames
 		groups = append(groups, g)
 	}
 	return &Source{Path: path, Groups: groups}, nil
 }
 
-func enumerateGroupIDs(h windows.Handle) ([]Identifier, error) {
-	var ids []Identifier
+func enumerateGroupIDs(h windows.Handle) ([]identifier, error) {
+	var ids []identifier
 	cb := syscall.NewCallback(func(_, _, name *uint16, _ uintptr) uintptr {
 		p := uintptr(unsafe.Pointer(name))
 		if p>>16 == 0 {
-			ids = append(ids, Identifier{ID: uint16(p)})
+			ids = append(ids, identifier{ID: uint16(p)})
 		} else {
-			ids = append(ids, Identifier{Name: windows.UTF16PtrToString(name), IsString: true})
+			ids = append(ids, identifier{Name: windows.UTF16PtrToString(name), IsString: true})
 		}
 		return 1
 	})
@@ -138,25 +129,26 @@ func enumerateGroupIDs(h windows.Handle) ([]Identifier, error) {
 	return ids, nil
 }
 
-// parseGroupResource turns an RT_GROUP_ICON resource into frames by loading
-// each referenced RT_ICON. The width and height bytes 0 mean 256.
-func parseGroupResource(h windows.Handle, data []byte) ([]Frame, error) {
+// parseGroupResource reads the declared frame widths from an RT_GROUP_ICON
+// resource and verifies that every referenced RT_ICON exists. A width byte of
+// 0 means 256.
+func parseGroupResource(h windows.Handle, data []byte) (int, error) {
 	if len(data) < 6 {
-		return nil, fmt.Errorf("图标组数据过短")
+		return 0, fmt.Errorf("图标组数据过短")
 	}
 	if binary.LittleEndian.Uint16(data[0:2]) != 0 || binary.LittleEndian.Uint16(data[2:4]) != 1 {
-		return nil, fmt.Errorf("图标组格式无效")
+		return 0, fmt.Errorf("图标组格式无效")
 	}
 	count := int(binary.LittleEndian.Uint16(data[4:6]))
 	if count <= 0 || count > 1024 {
-		return nil, fmt.Errorf("图标组包含无效的图像数量（%d）", count)
+		return 0, fmt.Errorf("图标组包含无效的图像数量（%d）", count)
 	}
 	const entrySize = 14
 	if len(data) < 6+count*entrySize {
-		return nil, fmt.Errorf("图标组数据不完整")
+		return 0, fmt.Errorf("图标组数据不完整")
 	}
 
-	frames := make([]Frame, 0, count)
+	largest := 0
 	var firstErr error
 	for i := 0; i < count; i++ {
 		off := 6 + i*entrySize
@@ -164,11 +156,6 @@ func parseGroupResource(h windows.Handle, data []byte) ([]Frame, error) {
 		if width == 0 {
 			width = 256
 		}
-		height := int(data[off+1])
-		if height == 0 {
-			height = 256
-		}
-		bpp := int(binary.LittleEndian.Uint16(data[off+6 : off+8]))
 		size := int(binary.LittleEndian.Uint32(data[off+8 : off+12]))
 		iconID := binary.LittleEndian.Uint16(data[off+12 : off+14])
 		if size <= 0 || size > maxIconBytes {
@@ -177,31 +164,28 @@ func parseGroupResource(h windows.Handle, data []byte) ([]Frame, error) {
 			}
 			continue
 		}
-		raw, err := loadResource(h, Identifier{ID: iconID}, windows.ResourceID(rtIcon))
-		if err != nil {
+		if _, err := loadResource(h, identifier{ID: iconID}, windows.ResourceID(rtIcon)); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("图标 %d：%w", i+1, err)
 			}
 			continue
 		}
-		frames = append(frames, Frame{
-			Width:  width,
-			Height: height,
-			BPP:    bpp,
-			Data:   raw,
-			IsPNG:  hasPNGSignature(raw),
-		})
-	}
-	if len(frames) == 0 {
-		if firstErr != nil {
-			return nil, firstErr
+		if width > largest {
+			largest = width
 		}
-		return nil, fmt.Errorf("图标组不包含可读取的图像")
 	}
-	return frames, nil
+	if largest == 0 {
+		if firstErr != nil {
+			return 0, firstErr
+		}
+		return 0, fmt.Errorf("图标组不包含可读取的图像")
+	}
+	return largest, nil
 }
 
-func loadResource(h windows.Handle, ident Identifier, typeID windows.ResourceID) ([]byte, error) {
+// loadResource returns data owned by the loaded module; it stays valid until
+// FreeLibrary.
+func loadResource(h windows.Handle, ident identifier, typeID windows.ResourceID) ([]byte, error) {
 	var (
 		hr  windows.Handle
 		err error
@@ -218,9 +202,5 @@ func loadResource(h windows.Handle, ident Identifier, typeID windows.ResourceID)
 	if err != nil {
 		return nil, fmt.Errorf("加载资源失败：%w", err)
 	}
-	// The data belongs to the datafile module and is released by
-	// FreeLibrary, so copy it before the caller keeps the frame.
-	out := make([]byte, len(data))
-	copy(out, data)
-	return out, nil
+	return data, nil
 }

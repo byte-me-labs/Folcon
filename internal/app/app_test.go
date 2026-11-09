@@ -15,18 +15,8 @@ func testSource() *winicon.Source {
 	return &winicon.Source{
 		Path: `C:\Temp\demo\app.exe`,
 		Groups: []winicon.Group{
-			{
-				Ordinal: 0,
-				ID:      1,
-				Frames:  []winicon.Frame{{Width: 32, Height: 32, BPP: 32}},
-			},
-			{
-				Ordinal:  1,
-				ID:       7,
-				Name:     "MSH_SECURITY",
-				IsString: true,
-				Frames:   []winicon.Frame{{Width: 256, Height: 256, BPP: 32}},
-			},
+			{Ordinal: 0, MaxWidth: 32},
+			{Ordinal: 1, MaxWidth: 256},
 		},
 	}
 }
@@ -116,41 +106,42 @@ func TestWelcomeFitsCompactWindow(t *testing.T) {
 	)
 }
 
-func TestUsableGroupIndexes(t *testing.T) {
+func TestDefaultGroup(t *testing.T) {
 	src := testSource()
 	src.Groups = append(src.Groups,
 		winicon.Group{Ordinal: 2, Err: os.ErrPermission},
 		winicon.Group{Ordinal: 3},
 	)
-	got := usableGroupIndexes(src)
-	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
-		t.Fatalf("usableGroupIndexes = %v, want [0 1]", got)
-	}
-	if got := usableGroupIndexes(nil); got != nil {
-		t.Fatalf("usableGroupIndexes(nil) = %v", got)
-	}
-	if got := usableGroupIndexes(&winicon.Source{}); len(got) != 0 {
-		t.Fatalf("usableGroupIndexes(empty) = %v", got)
-	}
-}
-
-func TestDefaultGroupPrefersLargest(t *testing.T) {
-	src := testSource()
-	if got := defaultGroup(src, usableGroupIndexes(src)); got != 1 {
+	if got := defaultGroup(src); got != 1 {
 		t.Fatalf("defaultGroup = %d, want the 256 group (1)", got)
 	}
 
-	// Equal largest sizes keep the earlier group.
-	src.Groups[0].Frames = []winicon.Frame{{Width: 256, Height: 256, BPP: 32}}
-	if got := defaultGroup(src, usableGroupIndexes(src)); got != 0 {
+	// Equal largest widths keep the earlier group.
+	src.Groups[0].MaxWidth = 256
+	if got := defaultGroup(src); got != 0 {
 		t.Fatalf("defaultGroup = %d, want the earlier group (0) on a tie", got)
 	}
 
-	// A larger first group wins over a smaller later one.
+	// A wider first group wins over a smaller later one.
 	src = testSource()
-	src.Groups[1].Frames = []winicon.Frame{{Width: 16, Height: 16, BPP: 32}}
-	if got := defaultGroup(src, usableGroupIndexes(src)); got != 0 {
+	src.Groups[1].MaxWidth = 16
+	if got := defaultGroup(src); got != 0 {
 		t.Fatalf("defaultGroup = %d, want the 32px group (0)", got)
+	}
+
+	// Nil, empty, and all-unusable sources have no default group.
+	if got := defaultGroup(nil); got != -1 {
+		t.Fatalf("defaultGroup(nil) = %d, want -1", got)
+	}
+	if got := defaultGroup(&winicon.Source{}); got != -1 {
+		t.Fatalf("defaultGroup(empty) = %d, want -1", got)
+	}
+	failed := &winicon.Source{Groups: []winicon.Group{
+		{Ordinal: 0, Err: os.ErrPermission},
+		{Ordinal: 1},
+	}}
+	if got := defaultGroup(failed); got != -1 {
+		t.Fatalf("defaultGroup(all unusable) = %d, want -1", got)
 	}
 }
 

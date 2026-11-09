@@ -52,13 +52,13 @@ func TestApplyPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSource: %v", err)
 	}
-	usable := usableGroupIndexes(src)
-	if len(usable) == 0 {
+	index := defaultGroup(src)
+	if index < 0 {
 		t.Fatalf("powershell.exe yielded no usable icon groups: %+v", src.Groups)
 	}
 
 	// The wizard applies the largest group without asking.
-	group := src.Groups[defaultGroup(src, usable)]
+	group := src.Groups[index]
 	ordinal := group.Ordinal
 	if err := foldericon.Apply(dir, foldericon.IconRef{Path: rel, Index: ordinal}); err != nil {
 		t.Fatalf("Apply: %v", err)
